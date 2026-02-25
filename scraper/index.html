@@ -1234,7 +1234,8 @@
       }
 
       function downloadCsv(filename, headers, rows, tileConfig = null, tileI18n = null) {
-        const headerLine = headers.map(csvEscape).join(",");
+        const localizedHeaders = headers.map((h) => localizedHeaderLabel(h));
+        const headerLine = localizedHeaders.map(csvEscape).join(",");
         const dataLines = rows.map((row) => headers.map((h) => csvEscape(row[h] ?? "")).join(","));
         const lines = [headerLine, ...dataLines];
         if (tileConfig) {

@@ -134,6 +134,13 @@
         transform: translateY(-1px);
       }
 
+      .graph-controls button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+        box-shadow: none;
+        transform: none;
+      }
+
       svg {
         width: 100%;
         height: auto;
@@ -325,16 +332,7 @@
         color: var(--muted);
       }
 
-      .job-row.tone-0 td { background: #f3f9ff; }
-      .job-row.tone-1 td { background: #eef6ff; }
-      .job-row.tone-2 td { background: #eaf3ff; }
-      .job-row.tone-3 td { background: #e5f0ff; }
-      .job-row.tone-4 td { background: #e1edff; }
-      .job-row.tone-5 td { background: #dceaff; }
-      .job-row.tone-6 td { background: #d8e7ff; }
-      .job-row.tone-7 td { background: #d3e4ff; }
-      .job-row.tone-8 td { background: #cfe1ff; }
-      .job-row.tone-9 td { background: #cadeff; }
+      .job-row td { background: transparent; }
       .job-row.above-median td { background: #ffe8ea !important; }
       .city-row.above-median td { background: #ffe8ea !important; }
 
@@ -352,6 +350,66 @@
         line-height: 1.35;
         white-space: nowrap;
         z-index: 3;
+      }
+
+      .zoom-click-menu {
+        position: absolute;
+        z-index: 6;
+        min-width: 220px;
+        max-width: 280px;
+        background: rgba(255, 255, 255, 0.98);
+        border: 1px solid #d1e2f8;
+        border-radius: 12px;
+        box-shadow: 0 14px 28px rgba(18, 34, 53, 0.22);
+        padding: 10px;
+      }
+
+      .zoom-click-menu-title {
+        font-size: 0.86rem;
+        font-weight: 700;
+        color: #123252;
+        margin: 0 0 4px;
+      }
+
+      .zoom-click-menu-text {
+        font-size: 0.8rem;
+        color: #4a627e;
+        margin: 0 0 8px;
+      }
+
+      .zoom-click-menu-actions {
+        display: flex;
+        gap: 6px;
+        justify-content: flex-end;
+      }
+
+      .zoom-click-menu-actions button {
+        border: 1px solid #002a70;
+        border-radius: 8px;
+        background: #003A9B;
+        color: #ffffff;
+        font: inherit;
+        font-size: 0.78rem;
+        font-weight: 700;
+        padding: 5px 9px;
+        cursor: pointer;
+        transition: box-shadow 120ms ease, transform 120ms ease, background-color 120ms ease;
+      }
+
+      .zoom-click-menu-actions button:hover {
+        background: #002f82;
+        box-shadow: 0 4px 10px rgba(18, 34, 53, 0.16);
+        transform: translateY(-1px);
+      }
+
+      .zoom-click-menu-actions .cancel-btn {
+        background: #f3f8ff;
+        color: #1f4f86;
+        border-color: #bcd2ee;
+      }
+
+      .zoom-click-menu-actions .cancel-btn:hover {
+        background: #e9f2ff;
       }
 
       @media (max-width: 768px) {
@@ -386,14 +444,15 @@
           <div class="graph-controls">
             <label id="graphMetricLabel" for="costMetricSelector">Graph cost metric</label>
             <select id="costMetricSelector">
-              <option value="cpa">CPA</option>
               <option value="cpas">CPAS</option>
+              <option value="cpa">CPA</option>
             </select>
             <label id="minLabel" for="costMinInput">Min</label>
             <input id="costMinInput" type="number" min="0" step="0.01" placeholder="0" />
             <label id="maxLabel" for="costMaxInput">Max</label>
             <input id="costMaxInput" type="number" min="0" step="0.01" placeholder="No max" />
             <button id="applyCostFilterBtn" type="button">Apply</button>
+            <button id="resetZoomBtn" type="button" disabled>Reset Zoom</button>
           </div>
           <div class="legend">
             <div class="legend-labels"><span id="legendCostLow">LOW CPA percentile</span><span id="legendCostHigh">HIGH CPA percentile</span></div>
@@ -476,21 +535,26 @@
       let lastRenderedCityData = [];
       let showApplicationsMetrics = true;
       const tableSort = { key: "spend", dir: "desc" };
-      let selectedCostMetric = "cpa";
+      let selectedCostMetric = "cpas";
       let costFilter = { min: null, max: null };
       let medianJobFilterMode = "none";
       let medianCityCPA = null;
       let medianCityCPAS = null;
       let medianJobCPA = null;
       let medianJobCPAS = null;
+      let zoomState = null;
+      let chartScaleState = null;
+      let zoomBrushState = { active: false, startX: 0, startY: 0, rect: null };
+      let zoomPromptEl = null;
+      let suppressZoomPromptClick = false;
       let lastUploadExportMeta = null;
       const uiText = {
-        en: { title: "Budget Efficiency (CPA/CPAS vs Volume)", subtitle: "X = Volume (Applications or Apply starts), Y = Cost (CPA or CPAS), bubble size = Jobs, color = cost percentile.", graphMetric: "Graph cost metric", min: "Min", max: "Max", apply: "Apply", legend: "Higher on the Y-axis means higher cost.", cpaBtn: "CPA Above Median", cpasBtn: "CPAS Above Median", exportBtn: "Export", defaultStatus: "Showing built-in sample data. Upload a CSV to replace it." },
-        de: { title: "Budget-Effizienz (CPA/CPAS vs Volumen)", subtitle: "X = Volumen (Bewerbungen oder Starts), Y = Kosten (CPA oder CPAS), Blasengröße = Jobs, Farbe = Kosten-Perzentil.", graphMetric: "Kostenmetrik", min: "Min", max: "Max", apply: "Anwenden", legend: "Höher auf der Y-Achse bedeutet höhere Kosten.", cpaBtn: "CPA über Median", cpasBtn: "CPAS über Median", exportBtn: "Export", defaultStatus: "Beispieldaten werden angezeigt. CSV hochladen zum Ersetzen." },
-        fr: { title: "Efficacité budget (CPA/CPAS vs volume)", subtitle: "X = volume (candidatures ou démarrages), Y = coût (CPA ou CPAS), taille = jobs, couleur = percentile de coût.", graphMetric: "Métrique de coût", min: "Min", max: "Max", apply: "Appliquer", legend: "Plus haut sur l'axe Y signifie un coût plus élevé.", cpaBtn: "CPA au-dessus de la médiane", cpasBtn: "CPAS au-dessus de la médiane", exportBtn: "Exporter", defaultStatus: "Données de démonstration affichées. Importez un CSV pour remplacer." },
-        es: { title: "Eficiencia de presupuesto (CPA/CPAS vs volumen)", subtitle: "X = volumen (solicitudes o inicios), Y = coste (CPA o CPAS), tamaño = empleos, color = percentil de coste.", graphMetric: "Métrica de coste", min: "Mín", max: "Máx", apply: "Aplicar", legend: "Más arriba en el eje Y significa mayor coste.", cpaBtn: "CPA por encima de mediana", cpasBtn: "CPAS por encima de mediana", exportBtn: "Exportar", defaultStatus: "Mostrando datos de demostración. Sube un CSV para reemplazar." },
-        it: { title: "Efficienza budget (CPA/CPAS vs volume)", subtitle: "X = volume (candidature o avvii), Y = costo (CPA o CPAS), dimensione = lavori, colore = percentile costo.", graphMetric: "Metrica costo", min: "Min", max: "Max", apply: "Applica", legend: "Più in alto sull'asse Y significa costo più alto.", cpaBtn: "CPA sopra mediana", cpasBtn: "CPAS sopra mediana", exportBtn: "Esporta", defaultStatus: "Dati demo visualizzati. Carica un CSV per sostituire." },
-        nl: { title: "Budgetefficiëntie (CPA/CPAS vs volume)", subtitle: "X = volume (sollicitaties of starts), Y = kosten (CPA of CPAS), bubbelgrootte = jobs, kleur = kostenpercentiel.", graphMetric: "Kostmetriek", min: "Min", max: "Max", apply: "Toepassen", legend: "Hoger op de Y-as betekent hogere kosten.", cpaBtn: "CPA boven mediaan", cpasBtn: "CPAS boven mediaan", exportBtn: "Exporteren", defaultStatus: "Voorbeelddata wordt getoond. Upload een CSV om te vervangen." }
+        en: { title: "Budget Efficiency (CPA/CPAS vs Volume)", subtitle: "X = Volume (Applications or Apply starts), Y = Cost (CPA or CPAS), bubble size = Jobs, color = cost percentile.", graphMetric: "Graph cost metric", min: "Min", max: "Max", apply: "Apply", resetZoom: "Reset Zoom", legend: "Higher on the Y-axis means higher cost.", cpaBtn: "CPA Above Median", cpasBtn: "CPAS Above Median", exportBtn: "Export", defaultStatus: "Showing built-in sample data. Upload a CSV to replace it." },
+        de: { title: "Budget-Effizienz (CPA/CPAS vs Volumen)", subtitle: "X = Volumen (Bewerbungen oder Starts), Y = Kosten (CPA oder CPAS), Blasengröße = Jobs, Farbe = Kosten-Perzentil.", graphMetric: "Kostenmetrik", min: "Min", max: "Max", apply: "Anwenden", resetZoom: "Zoom zurücksetzen", legend: "Höher auf der Y-Achse bedeutet höhere Kosten.", cpaBtn: "CPA über Median", cpasBtn: "CPAS über Median", exportBtn: "Export", defaultStatus: "Beispieldaten werden angezeigt. CSV hochladen zum Ersetzen." },
+        fr: { title: "Efficacité budget (CPA/CPAS vs volume)", subtitle: "X = volume (candidatures ou démarrages), Y = coût (CPA ou CPAS), taille = jobs, couleur = percentile de coût.", graphMetric: "Métrique de coût", min: "Min", max: "Max", apply: "Appliquer", resetZoom: "Réinitialiser le zoom", legend: "Plus haut sur l'axe Y signifie un coût plus élevé.", cpaBtn: "CPA au-dessus de la médiane", cpasBtn: "CPAS au-dessus de la médiane", exportBtn: "Exporter", defaultStatus: "Données de démonstration affichées. Importez un CSV pour remplacer." },
+        es: { title: "Eficiencia de presupuesto (CPA/CPAS vs volumen)", subtitle: "X = volumen (solicitudes o inicios), Y = coste (CPA o CPAS), tamaño = empleos, color = percentil de coste.", graphMetric: "Métrica de coste", min: "Mín", max: "Máx", apply: "Aplicar", resetZoom: "Restablecer zoom", legend: "Más arriba en el eje Y significa mayor coste.", cpaBtn: "CPA por encima de mediana", cpasBtn: "CPAS por encima de mediana", exportBtn: "Exportar", defaultStatus: "Mostrando datos de demostración. Sube un CSV para reemplazar." },
+        it: { title: "Efficienza budget (CPA/CPAS vs volume)", subtitle: "X = volume (candidature o avvii), Y = costo (CPA o CPAS), dimensione = lavori, colore = percentile costo.", graphMetric: "Metrica costo", min: "Min", max: "Max", apply: "Applica", resetZoom: "Reimposta zoom", legend: "Più in alto sull'asse Y significa costo più alto.", cpaBtn: "CPA sopra mediana", cpasBtn: "CPAS sopra mediana", exportBtn: "Esporta", defaultStatus: "Dati demo visualizzati. Carica un CSV per sostituire." },
+        nl: { title: "Budgetefficiëntie (CPA/CPAS vs volume)", subtitle: "X = volume (sollicitaties of starts), Y = kosten (CPA of CPAS), bubbelgrootte = jobs, kleur = kostenpercentiel.", graphMetric: "Kostmetriek", min: "Min", max: "Max", apply: "Toepassen", resetZoom: "Zoom resetten", legend: "Hoger op de Y-as betekent hogere kosten.", cpaBtn: "CPA boven mediaan", cpasBtn: "CPAS boven mediaan", exportBtn: "Exporteren", defaultStatus: "Voorbeelddata wordt getoond. Upload een CSV om te vervangen." }
       };
       const defaultTableLabels = {
         name: "City / Job",
@@ -549,6 +613,14 @@
           cpa: "CPA ($)"
         }
       };
+      const exportHeaderI18n = {
+        en: { job: "Job", city: "City", country: "Country", region: "State/Region", company: "Company name", reference: "Reference #", impressions: "Impressions", ctr: "Clickthrough rate (CTR)", clicks: "Clicks", asr: "Apply start rate (ASR)", applystarts: "Apply starts", acr: "Apply completion rate (ACR)", applies: "Applies", ar: "Apply rate (AR)", spend: "Spend", cpc: "Cost per click (CPC)", cpas: "Cost per apply start (CPAS)", cpa: "Cost per apply (CPA)", status: "Job status", campaign: "Campaigns" },
+        de: { job: "Stelle", city: "Stadt", country: "Land", region: "Bundesland/Region", company: "Unternehmensname", reference: "Referenz #", impressions: "Impressionen", ctr: "Klickrate (CTR)", clicks: "Klicks", asr: "Rate begonnener Bewerbungen (ASR)", applystarts: "Begonnene Bewerbungen", acr: "Abschlussrate Bewerbung (ACR)", applies: "Bewerbungen", ar: "Bewerbungsrate (AR)", spend: "Ausgaben", cpc: "Kosten pro Klick (CPC)", cpas: "Kosten pro begonnene Bewerbung (CPAS)", cpa: "Kosten pro Bewerbung (CPA)", status: "Status der Stellenanzeige", campaign: "Kampagnen" },
+        fr: { job: "Emploi", city: "Ville", country: "Pays", region: "Région", company: "Nom de l'entreprise", reference: "Référence #", impressions: "Impressions", ctr: "Taux de clics (CTR)", clicks: "Clics", asr: "Taux de candidatures commencées (ASR)", applystarts: "Candidatures commencées", acr: "Taux de candidature terminée (ACR)", applies: "Candidatures", ar: "Taux de candidature (AR)", spend: "Dépenses", cpc: "Coût par clic (CPC)", cpas: "Coût par candidature commencée (CPAS)", cpa: "Coût par candidature (CPA)", status: "Statut de l'emploi", campaign: "Campagnes" },
+        es: { job: "Empleo", city: "Ciudad", country: "País", region: "Estado/Región", company: "Nombre de la empresa", reference: "Referencia #", impressions: "Impresiones", ctr: "Porcentaje de clics (CTR)", clicks: "Clics", asr: "Porcentaje de postulaciones iniciadas (ASR)", applystarts: "Postulaciones iniciadas", acr: "Tasa de finalización de solicitud (ACR)", applies: "Postulaciones", ar: "Tasa de solicitud (AR)", spend: "Gasto", cpc: "Coste por clic (CPC)", cpas: "Coste por postulación iniciada (CPAS)", cpa: "Coste por solicitud (CPA)", status: "Estado del empleo", campaign: "Campañas" },
+        it: { job: "Annuncio", city: "Città", country: "Paese", region: "Regione", company: "Nome dell'azienda", reference: "Riferimento #", impressions: "Impression", ctr: "Percentuale di click (CTR)", clicks: "Clic", asr: "Percentuale di candidature avviate (ASR)", applystarts: "Candidature avviate", acr: "Percentuale di completamento candidatura (ACR)", applies: "Candidature", ar: "Tasso di candidatura (AR)", spend: "Spesa", cpc: "Costo per clic (CPC)", cpas: "Costo per candidatura avviata (CPAS)", cpa: "Costo per candidatura (CPA)", status: "Stato dell'annuncio", campaign: "Campagne" },
+        nl: { job: "Vacature", city: "Plaats", country: "Land", region: "Provincie/Regio", company: "Bedrijfsnaam", reference: "Referentie #", impressions: "Impressies", ctr: "Klikfrequentie (CTR)", clicks: "Kliks", asr: "Percentage gestarte sollicitaties (ASR)", applystarts: "Gestarte sollicitaties", acr: "Sollicitatievoltooiingspercentage (ACR)", applies: "Sollicitaties", ar: "Sollicitatiepercentage (AR)", spend: "Besteding", cpc: "Kosten per klik (CPC)", cpas: "Kosten per gestarte sollicitatie (CPAS)", cpa: "Kosten per sollicitatie (CPA)", status: "Vacaturestatus", campaign: "Campagnes" }
+      };
 
       const width = 1120;
       const height = 620;
@@ -579,6 +651,7 @@
         set("minLabel", t.min);
         set("maxLabel", t.max);
         set("applyCostFilterBtn", t.apply);
+        set("resetZoomBtn", t.resetZoom || "Reset Zoom");
         set("legendNote", t.legend);
         set("filterMedianCpaBtn", t.cpaBtn);
         set("filterMedianCpasBtn", t.cpasBtn);
@@ -704,7 +777,7 @@
         const parts = [];
         if (showApplicationsMetrics && Number.isFinite(medianJobCPA)) parts.push(`Median CPA: $${medianJobCPA.toFixed(2)}`);
         if (Number.isFinite(medianJobCPAS)) parts.push(`Median CPAS: $${medianJobCPAS.toFixed(2)}`);
-        const message = parts.length ? parts.join(" | ") : "";
+        const message = parts.length ? `${parts.join(" | ")} (excluding 0 values)` : "";
         if (graphEl) graphEl.textContent = message;
         if (tableEl) tableEl.textContent = message;
       }
@@ -762,6 +835,32 @@
         URL.revokeObjectURL(url);
       }
 
+      function localizeExportHeader(header) {
+        const labels = exportHeaderI18n[currentLanguage] || exportHeaderI18n.en;
+        const normalized = normalizeHeader(header);
+        if (normalized.includes("jobstatus") || normalized === "status") return labels.status;
+        if (normalized === "job" || normalized === "vacature" || normalized === "stelle" || normalized === "emploi" || normalized === "annuncio" || normalized === "empleo" || normalized === "functie" || normalized === "ruolo") return labels.job;
+        if (normalized === "city" || normalized === "plaats" || normalized === "stadt" || normalized === "ville" || normalized === "citta" || normalized === "ciudad") return labels.city;
+        if (normalized === "country" || normalized === "land" || normalized === "pays" || normalized === "paese" || normalized === "pais") return labels.country;
+        if (normalized.includes("region") || normalized.includes("state") || normalized.includes("province") || normalized.includes("regio")) return labels.region;
+        if (normalized.includes("companyname") || normalized.includes("bedrijfsnaam") || normalized.includes("unternehmensname")) return labels.company;
+        if (normalized.includes("reference")) return labels.reference;
+        if (normalized.includes("impression")) return labels.impressions;
+        if (normalized.includes("clickthroughratectr") || normalized === "ctr" || normalized.includes("klickrate") || normalized.includes("tauxdeclicks")) return labels.ctr;
+        if (normalized === "clicks" || normalized === "klicks" || normalized === "clics" || normalized === "kliks") return labels.clicks;
+        if (normalized.includes("applystartrateasr") || normalized === "asr" || normalized.includes("ratebegonnenerbewerbungen") || normalized.includes("tauxdecandidaturescommencees") || normalized.includes("percentagegestartesollicitaties")) return labels.asr;
+        if (normalized.includes("applystarts") || normalized.includes("gestartesollicitaties") || normalized.includes("begonnenebewerbungen") || normalized.includes("candidaturescommencees") || normalized.includes("candidatureavviate") || normalized.includes("postulacionesiniciadas")) return labels.applystarts;
+        if (normalized.includes("applycompletionrateacr") || normalized === "acr" || normalized.includes("abschlussratebewerbung") || normalized.includes("tauxdecandidatureterminee") || normalized.includes("sollicitatievoltooiingspercentage")) return labels.acr;
+        if (normalized === "applies" || normalized === "applications" || normalized.includes("sollicitaties") || normalized.includes("bewerbungen") || normalized.includes("candidatures") || normalized.includes("postulaciones")) return labels.applies;
+        if (normalized.includes("applyratear") || normalized === "ar") return labels.ar;
+        if (normalized === "spend" || normalized === "cost" || normalized === "besteding" || normalized === "ausgaben" || normalized === "depenses" || normalized === "spesa" || normalized === "gasto") return labels.spend;
+        if (normalized.includes("costperclickcpc") || normalized === "cpc") return labels.cpc;
+        if (normalized.includes("costperapplystartcpas") || normalized === "cpas") return labels.cpas;
+        if (normalized.includes("costperapplycpa") || normalized === "cpa" || normalized.includes("costperapplication")) return labels.cpa;
+        if (normalized.includes("campaign")) return labels.campaign;
+        return header;
+      }
+
       function exportRowsAboveThreshold() {
         if (!lastUploadExportMeta || !Array.isArray(lastUploadExportMeta.rows) || !lastUploadExportMeta.rows.length) {
           statusEl.textContent = "Export requires an uploaded CSV file.";
@@ -782,9 +881,10 @@
         });
 
         const outputRows = filtered.map((row) => row.cells);
+        const localizedHeaders = lastUploadExportMeta.headers.map((header) => localizeExportHeader(header));
         const sourceName = lastUploadExportMeta.sourceName || "uploaded";
         const fileName = `${sourceName.replace(/\.csv$/i, "")}_${metric}_above_${threshold}.csv`;
-        triggerDownloadCsv(fileName, lastUploadExportMeta.headers, outputRows);
+        triggerDownloadCsv(fileName, localizedHeaders, outputRows);
         statusEl.textContent = `Exported ${outputRows.length} row(s) above ${metric.toUpperCase()} ${threshold}.`;
       }
 
@@ -1054,16 +1154,13 @@
         return blendColor(gradientStops.mid, gradientStops.low, (p - 0.5) / 0.5);
       }
 
-      function tableMetricColor(ratio) {
+      function tableMetricColor(ratio, reverse = false) {
         const r = Math.max(0, Math.min(1, ratio));
+        const t = reverse ? (1 - r) : r;
         const green = { r: 228, g: 246, b: 235 };
-        const yellow = { r: 252, g: 245, b: 220 };
         const red = { r: 252, g: 231, b: 229 };
-        const lerp = (a, b, t) => Math.round(a + (b - a) * t);
-        const from = r < 0.5 ? green : yellow;
-        const to = r < 0.5 ? yellow : red;
-        const localT = r < 0.5 ? r / 0.5 : (r - 0.5) / 0.5;
-        return `rgba(${lerp(from.r, to.r, localT)}, ${lerp(from.g, to.g, localT)}, ${lerp(from.b, to.b, localT)}, 0.34)`;
+        const lerp = (a, b, v) => Math.round(a + (b - a) * v);
+        return `rgba(${lerp(green.r, red.r, t)}, ${lerp(green.g, red.g, t)}, ${lerp(green.b, red.b, t)}, 0.58)`;
       }
 
       function drawAxisLine(x1, y1, x2, y2) {
@@ -1144,6 +1241,157 @@
 
       function hideTooltip() {
         tooltipEl.style.opacity = "0";
+      }
+
+      function hideZoomClickMenu() {
+        if (zoomPromptEl && zoomPromptEl.parentNode) {
+          zoomPromptEl.parentNode.removeChild(zoomPromptEl);
+        }
+        zoomPromptEl = null;
+      }
+
+      function resetZoomAndRender() {
+        zoomState = null;
+        hideZoomClickMenu();
+        updateZoomButtonState();
+        if (lastRawCityData.length) render(lastRawCityData, "Zoom reset");
+      }
+
+      function showZoomClickMenu(event) {
+        if (!zoomState) return;
+        hideZoomClickMenu();
+        const host = tooltipEl.parentElement;
+        if (!host) return;
+        const hostRect = host.getBoundingClientRect();
+        const x = event.clientX - hostRect.left + 8;
+        const y = event.clientY - hostRect.top + 8;
+
+        const menu = document.createElement("div");
+        menu.className = "zoom-click-menu";
+        menu.style.left = `${x}px`;
+        menu.style.top = `${y}px`;
+        menu.innerHTML = `
+          <p class="zoom-click-menu-title">Zoom active</p>
+          <p class="zoom-click-menu-text">Reset zoom to full view?</p>
+          <div class="zoom-click-menu-actions">
+            <button type="button" class="cancel-btn">Cancel</button>
+            <button type="button" class="reset-btn">Reset Zoom</button>
+          </div>
+        `;
+
+        const maxLeft = Math.max(8, host.clientWidth - 292);
+        const maxTop = Math.max(8, host.clientHeight - 152);
+        menu.style.left = `${Math.max(8, Math.min(x, maxLeft))}px`;
+        menu.style.top = `${Math.max(8, Math.min(y, maxTop))}px`;
+
+        menu.querySelector(".cancel-btn").addEventListener("click", (e) => {
+          e.stopPropagation();
+          hideZoomClickMenu();
+        });
+        menu.querySelector(".reset-btn").addEventListener("click", (e) => {
+          e.stopPropagation();
+          resetZoomAndRender();
+        });
+        menu.addEventListener("click", (e) => e.stopPropagation());
+
+        host.appendChild(menu);
+        zoomPromptEl = menu;
+      }
+
+      function updateZoomButtonState() {
+        const resetBtn = document.getElementById("resetZoomBtn");
+        if (resetBtn) resetBtn.disabled = !zoomState;
+      }
+
+      function getSvgPoint(event) {
+        const rect = svg.getBoundingClientRect();
+        return {
+          x: ((event.clientX - rect.left) / rect.width) * width,
+          y: ((event.clientY - rect.top) / rect.height) * height
+        };
+      }
+
+      function clampToPlot(point) {
+        return {
+          x: Math.max(margin.left, Math.min(margin.left + innerW, point.x)),
+          y: Math.max(margin.top, Math.min(margin.top + innerH, point.y))
+        };
+      }
+
+      function startZoomBrush(event) {
+        if (event.button !== 0) return;
+        if (!chartScaleState) return;
+        const targetTag = String(event.target && event.target.tagName || "").toLowerCase();
+        if (targetTag === "circle") return;
+        const start = clampToPlot(getSvgPoint(event));
+        zoomBrushState.active = true;
+        zoomBrushState.startX = start.x;
+        zoomBrushState.startY = start.y;
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", String(start.x));
+        rect.setAttribute("y", String(start.y));
+        rect.setAttribute("width", "0");
+        rect.setAttribute("height", "0");
+        rect.setAttribute("fill", "rgba(0, 58, 155, 0.18)");
+        rect.setAttribute("stroke", "#003A9B");
+        rect.setAttribute("stroke-width", "1");
+        rect.setAttribute("stroke-dasharray", "4 4");
+        rect.setAttribute("pointer-events", "none");
+        svg.appendChild(rect);
+        zoomBrushState.rect = rect;
+      }
+
+      function moveZoomBrush(event) {
+        if (!zoomBrushState.active || !zoomBrushState.rect) return;
+        const current = clampToPlot(getSvgPoint(event));
+        const x = Math.min(zoomBrushState.startX, current.x);
+        const y = Math.min(zoomBrushState.startY, current.y);
+        const w = Math.abs(current.x - zoomBrushState.startX);
+        const h = Math.abs(current.y - zoomBrushState.startY);
+        zoomBrushState.rect.setAttribute("x", String(x));
+        zoomBrushState.rect.setAttribute("y", String(y));
+        zoomBrushState.rect.setAttribute("width", String(w));
+        zoomBrushState.rect.setAttribute("height", String(h));
+      }
+
+      function endZoomBrush(event) {
+        if (!zoomBrushState.active) return;
+        const rectEl = zoomBrushState.rect;
+        const end = clampToPlot(getSvgPoint(event));
+        const x1 = zoomBrushState.startX;
+        const y1 = zoomBrushState.startY;
+        const x2 = end.x;
+        const y2 = end.y;
+        zoomBrushState.active = false;
+        zoomBrushState.rect = null;
+        if (rectEl && rectEl.parentNode) rectEl.parentNode.removeChild(rectEl);
+        if (!chartScaleState) return;
+
+        const dx = Math.abs(x2 - x1);
+        const dy = Math.abs(y2 - y1);
+        if (dx < 8 || dy < 8) return;
+
+        const pxMin = Math.min(x1, x2);
+        const pxMax = Math.max(x1, x2);
+        const pyMin = Math.min(y1, y2);
+        const pyMax = Math.max(y1, y2);
+
+        const xMin = chartScaleState.xFromPixel(pxMin);
+        const xMax = chartScaleState.xFromPixel(pxMax);
+        const yMax = chartScaleState.yFromPixel(pyMin);
+        const yMin = chartScaleState.yFromPixel(pyMax);
+
+        if (!(Number.isFinite(xMin) && Number.isFinite(xMax) && Number.isFinite(yMin) && Number.isFinite(yMax))) return;
+        if (xMax <= xMin || yMax <= yMin) return;
+
+        zoomState = { xMin, xMax, yMin, yMax };
+        suppressZoomPromptClick = true;
+        setTimeout(() => {
+          suppressZoomPromptClick = false;
+        }, 0);
+        hideZoomClickMenu();
+        updateZoomButtonState();
+        if (lastRawCityData.length) render(lastRawCityData, "Zoom updated");
       }
 
       function getCardRelativeMouse(event) {
@@ -1261,6 +1509,17 @@
         return sorted;
       }
 
+      function percentileRatioFromSorted(sortedValues, value) {
+        if (!Array.isArray(sortedValues) || !sortedValues.length || !Number.isFinite(value)) return 0.5;
+        if (sortedValues.length === 1) return 0.5;
+        let idx = sortedValues.findIndex((v) => v >= value);
+        if (idx === -1) idx = sortedValues.length - 1;
+        if (idx > 0 && sortedValues[idx] === value) {
+          while (idx > 0 && sortedValues[idx - 1] === value) idx -= 1;
+        }
+        return idx / (sortedValues.length - 1);
+      }
+
       function updateSortButtons() {
         document.querySelectorAll(".sort-btn").forEach((btn) => {
           const key = btn.dataset.sortKey;
@@ -1281,7 +1540,7 @@
         const validCityKeys = new Set(rows.map((row) => row.city));
         expandedCities = new Set(Array.from(expandedCities).filter((cityKey) => validCityKeys.has(cityKey)));
         const metricColorMode = medianJobFilterMode === "none"
-          ? (tableSort.key === "applyStarts" || tableSort.key === "cpa" || tableSort.key === "cpas")
+          ? (tableSort.key === "applyStarts" || tableSort.key === "applications" || tableSort.key === "cpa" || tableSort.key === "cpas")
             ? tableSort.key
             : "none"
           : "none";
@@ -1290,6 +1549,8 @@
           (r.jobRows || []).forEach((j) => {
             const value = metricColorMode === "applyStarts"
               ? Number(j.applyStartsTotal || 0)
+              : metricColorMode === "applications"
+                ? Number(j.applicationsTotal || 0)
               : metricColorMode === "cpa"
                 ? Number(j.cpa || 0)
                 : metricColorMode === "cpas"
@@ -1300,6 +1561,7 @@
         });
         const metricMin = metricValues.length ? Math.min(...metricValues) : 0;
         const metricMax = metricValues.length ? Math.max(...metricValues) : 1;
+        const metricSorted = metricValues.length ? [...metricValues].sort((a, b) => a - b) : [];
 
         function toggleCityExpansion(cityName) {
           if (expandedCities.has(cityName)) {
@@ -1405,14 +1667,19 @@
               ${jobCpaCell}
             `;
             tableBody.appendChild(jobTr);
-            if (!isAboveMedian && (metricColorMode === "cpa" || metricColorMode === "cpas" || metricColorMode === "applyStarts")) {
+            if (!isAboveMedian && (metricColorMode === "cpa" || metricColorMode === "cpas" || metricColorMode === "applyStarts" || metricColorMode === "applications")) {
               const rawValue = metricColorMode === "applyStarts"
                 ? Number(jobRow.applyStartsTotal || 0)
+                : metricColorMode === "applications"
+                  ? Number(jobRow.applicationsTotal || 0)
                 : metricColorMode === "cpa"
                   ? Number(jobRow.cpa || 0)
                   : Number(jobRow.cpas || 0);
-              const ratio = metricMax === metricMin ? 0.5 : Math.max(0, Math.min(1, (rawValue - metricMin) / (metricMax - metricMin)));
-              const color = tableMetricColor(ratio);
+              const ratio = (metricColorMode === "cpa" || metricColorMode === "cpas")
+                ? percentileRatioFromSorted(metricSorted, rawValue)
+                : (metricMax === metricMin ? 0.5 : Math.max(0, Math.min(1, (rawValue - metricMin) / (metricMax - metricMin))));
+              const reverse = metricColorMode === "applyStarts" || metricColorMode === "applications";
+              const color = tableMetricColor(ratio, reverse);
               jobTr.querySelectorAll("td").forEach((td) => {
                 td.style.backgroundColor = color;
               });
@@ -1425,11 +1692,14 @@
         computeMedianStats(cityData);
         svg.innerHTML = "";
         hideTooltip();
+        hideZoomClickMenu();
+        chartScaleState = null;
         const filteredCityData = applyCostFilter(cityData);
         lastRenderedCityData = filteredCityData;
         if (!filteredCityData.length) {
           statusEl.textContent = "No rows match the selected CPA/CPAS filter.";
           buildTable([]);
+          updateZoomButtonState();
           return;
         }
         filteredCityData.forEach((cityRow) => {
@@ -1447,15 +1717,32 @@
         enrichPerformanceMetrics(filteredCityData);
         const minCost = Math.min(...filteredCityData.map((d) => d.chartCost || 0));
         const maxCost = Math.max(...filteredCityData.map((d) => d.chartCost || 0));
-        const volumeRange = maxVolume - minVolume || 1;
-        const costRange = maxCost - minCost || 1;
+        if (zoomState) {
+          const validZoom =
+            Number.isFinite(zoomState.xMin) &&
+            Number.isFinite(zoomState.xMax) &&
+            Number.isFinite(zoomState.yMin) &&
+            Number.isFinite(zoomState.yMax) &&
+            zoomState.xMin < zoomState.xMax &&
+            zoomState.yMin < zoomState.yMax;
+          if (!validZoom) {
+            zoomState = null;
+          }
+        }
+
+        const activeMinVolume = zoomState ? zoomState.xMin : minVolume;
+        const activeMaxVolume = zoomState ? zoomState.xMax : maxVolume;
+        const activeMinCost = zoomState ? zoomState.yMin : minCost;
+        const activeMaxCost = zoomState ? zoomState.yMax : maxCost;
+        const volumeRange = activeMaxVolume - activeMinVolume || 1;
+        const costRange = activeMaxCost - activeMinCost || 1;
 
         function xScale(v) {
-          return margin.left + ((v - minVolume) / volumeRange) * innerW;
+          return margin.left + ((v - activeMinVolume) / volumeRange) * innerW;
         }
 
         function yScale(v) {
-          return margin.top + innerH - ((v - minCost) / costRange) * innerH;
+          return margin.top + innerH - ((v - activeMinCost) / costRange) * innerH;
         }
 
         function rScale(v) {
@@ -1463,10 +1750,10 @@
         }
 
         drawGrid(
-          minVolume,
-          maxVolume,
-          minCost,
-          maxCost,
+          activeMinVolume,
+          activeMaxVolume,
+          activeMinCost,
+          activeMaxCost,
           (v) => Math.round(v).toLocaleString(),
           (v) => `$${v.toFixed(2)}`
         );
@@ -1482,7 +1769,27 @@
         });
         document.getElementById("legendCostLow").textContent = `LOW ${graphMetricName} percentile`;
         document.getElementById("legendCostHigh").textContent = `HIGH ${graphMetricName} percentile`;
-        drawBubbles(filteredCityData, xScale, yScale, rScale, graphMetricName, volumeLabel);
+        const visibleCityData = filteredCityData.filter((point) => {
+          const volume = Number(point.chartVolume || 0);
+          const cost = Number(point.chartCost || 0);
+          return volume >= activeMinVolume && volume <= activeMaxVolume && cost >= activeMinCost && cost <= activeMaxCost;
+        });
+        drawBubbles(visibleCityData, xScale, yScale, rScale, graphMetricName, volumeLabel);
+        chartScaleState = {
+          xMin: activeMinVolume,
+          xMax: activeMaxVolume,
+          yMin: activeMinCost,
+          yMax: activeMaxCost,
+          xFromPixel(px) {
+            const ratio = (px - margin.left) / innerW;
+            return this.xMin + ratio * (this.xMax - this.xMin);
+          },
+          yFromPixel(py) {
+            const ratio = (py - margin.top) / innerH;
+            return this.yMax - ratio * (this.yMax - this.yMin);
+          }
+        };
+        updateZoomButtonState();
         buildTable(filteredCityData);
         statusEl.textContent = `${metricLabel}. Graph cost metric: ${graphMetricName}.`;
       }
@@ -1506,19 +1813,24 @@
           min: Number.isFinite(minVal) ? minVal : null,
           max: Number.isFinite(maxVal) ? maxVal : null
         };
+        zoomState = null;
+        hideZoomClickMenu();
+        updateZoomButtonState();
         if (lastRawCityData.length) render(lastRawCityData, "Filters updated");
       }
 
       async function applyCsvText(csvText, sourceLabel) {
         try {
-          const { cityData, metricLabel, preferredCostMetric, exportMeta } = aggregateByCity(csvText);
+          const { cityData, metricLabel, exportMeta } = aggregateByCity(csvText);
           lastRawCityData = cityData;
           medianJobFilterMode = "none";
           showApplicationsMetrics = cityData.some((row) => Number(row.applicationsTotal || 0) > 0);
           lastUploadExportMeta = exportMeta ? { ...exportMeta, sourceName: sourceLabel } : null;
           setTableHeaderLabels(tableLabelsByLanguage[currentLanguage] || defaultTableLabels);
-          selectedCostMetric = preferredCostMetric || selectedCostMetric;
           document.getElementById("costMetricSelector").value = selectedCostMetric;
+          zoomState = null;
+          hideZoomClickMenu();
+          updateZoomButtonState();
           render(cityData, `Loaded ${sourceLabel}. ${metricLabel}`);
         } catch (error) {
           statusEl.textContent = `Could not parse CSV: ${error.message}`;
@@ -1553,9 +1865,16 @@
 
       document.getElementById("costMetricSelector").addEventListener("change", (event) => {
         selectedCostMetric = event.target.value === "cpas" ? "cpas" : "cpa";
+        zoomState = null;
+        hideZoomClickMenu();
+        updateZoomButtonState();
         if (lastRawCityData.length) render(lastRawCityData, "Graph metric updated");
       });
       document.getElementById("applyCostFilterBtn").addEventListener("click", applyCostFiltersAndRender);
+      document.getElementById("resetZoomBtn").addEventListener("click", () => {
+        if (!zoomState) return;
+        resetZoomAndRender();
+      });
       document.getElementById("filterMedianCpaBtn").addEventListener("click", () => {
         if (!showApplicationsMetrics || !Number.isFinite(getActiveThreshold("cpa"))) return;
         medianJobFilterMode = medianJobFilterMode === "cpa" ? "none" : "cpa";
@@ -1595,12 +1914,27 @@
         if (lastRenderedCityData.length) buildTable(lastRenderedCityData);
       });
       document.getElementById("exportFilteredBtn").addEventListener("click", exportRowsAboveThreshold);
+      svg.addEventListener("mousedown", startZoomBrush);
+      window.addEventListener("mousemove", moveZoomBrush);
+      window.addEventListener("mouseup", endZoomBrush);
+      svg.addEventListener("click", (event) => {
+        if (!zoomState) return;
+        if (suppressZoomPromptClick) return;
+        event.stopPropagation();
+        showZoomClickMenu(event);
+      });
+      window.addEventListener("click", (event) => {
+        if (!zoomPromptEl) return;
+        if (zoomPromptEl.contains(event.target)) return;
+        hideZoomClickMenu();
+      });
 
       fileInput.addEventListener("change", handleFileSelection);
       lastRawCityData = [...sampleCityData];
       medianJobFilterMode = "none";
       setTableHeaderLabels(tableLabelsByLanguage[currentLanguage] || defaultTableLabels);
       showApplicationsMetrics = lastRawCityData.some((row) => Number(row.applicationsTotal || row.applications || 0) > 0);
+      document.getElementById("costMetricSelector").value = selectedCostMetric;
       applyUiLanguage(currentLanguage);
       render(
         lastRawCityData,

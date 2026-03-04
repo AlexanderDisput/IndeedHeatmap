@@ -173,6 +173,10 @@
         background: var(--surface);
       }
 
+      .chart-wrap {
+        position: relative;
+      }
+
       #chart {
         width: 100%;
         height: auto;
@@ -180,6 +184,43 @@
         background: linear-gradient(180deg, #fbfdff, #f3f8ff);
         border-radius: 8px;
       }
+
+      .quadrant-filter-overlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      .quadrant-filter-btn {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        pointer-events: auto;
+        border: 1px solid #002a70;
+        border-radius: 999px;
+        background: #003A9B;
+        color: #fff;
+        font: inherit;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 4px 8px;
+        cursor: pointer;
+        transition: box-shadow 120ms ease, transform 120ms ease, background-color 120ms ease;
+      }
+
+      .quadrant-filter-btn:hover {
+        background: #002f82;
+        box-shadow: 0 4px 10px rgba(18, 34, 53, 0.16);
+      }
+
+      .quadrant-filter-btn.active {
+        background: #0b5f35;
+        border-color: #084a2a;
+      }
+
+      .quadrant-filter-btn.q-hh { left: 75%; top: 25%; }
+      .quadrant-filter-btn.q-hl { left: 75%; top: 75%; }
+      .quadrant-filter-btn.q-lh { left: 25%; top: 25%; }
+      .quadrant-filter-btn.q-ll { left: 25%; top: 75%; }
 
       .tiles {
         margin-top: 16px;
@@ -341,19 +382,43 @@
         <p id="benchTitle" class="benchmark-title">Manual Benchmarks (Optional)</p>
         <div class="benchmark-controls">
           <div class="benchmark-field">
-            <label id="ctrBenchLabel" for="ctrBenchmarkInput">CTR Benchmark (%)</label>
-            <input id="ctrBenchmarkInput" type="number" min="0" step="0.1" />
+            <label id="xAxisLabel" for="xAxisMetricSelector">X-axis metric</label>
+            <select id="xAxisMetricSelector">
+              <option value="ctr">CTR</option>
+              <option value="asr">ASR</option>
+              <option value="acr">ACR</option>
+            </select>
           </div>
           <div class="benchmark-field">
-            <label id="asrBenchLabel" for="asrBenchmarkInput">ASR Benchmark (%)</label>
-            <input id="asrBenchmarkInput" type="number" min="0" step="0.1" />
+            <label id="yAxisLabel" for="yAxisMetricSelector">Y-axis metric</label>
+            <select id="yAxisMetricSelector">
+              <option value="asr">ASR</option>
+              <option value="ctr">CTR</option>
+              <option value="acr">ACR</option>
+            </select>
+          </div>
+          <div class="benchmark-field">
+            <label id="xBenchLabel" for="xBenchmarkInput">X Benchmark (%)</label>
+            <input id="xBenchmarkInput" type="number" min="0" step="0.1" />
+          </div>
+          <div class="benchmark-field">
+            <label id="yBenchLabel" for="yBenchmarkInput">Y Benchmark (%)</label>
+            <input id="yBenchmarkInput" type="number" min="0" step="0.1" />
           </div>
         </div>
       </section>
 
       <div class="quadrant-shell">
         <p id="benchmarkNotice" class="benchmark-note">Upload data to compute current medians.</p>
-        <svg id="chart" viewBox="0 0 1000 620" aria-label="Intent Quadrant Chart"></svg>
+        <div class="chart-wrap">
+          <svg id="chart" viewBox="0 0 1000 620" aria-label="Intent Quadrant Chart"></svg>
+          <div id="quadrantFilterOverlay" class="quadrant-filter-overlay">
+            <button id="filterQHH" class="quadrant-filter-btn q-hh" type="button">High/High</button>
+            <button id="filterQHL" class="quadrant-filter-btn q-hl" type="button">High/Low</button>
+            <button id="filterQLH" class="quadrant-filter-btn q-lh" type="button">Low/High</button>
+            <button id="filterQLL" class="quadrant-filter-btn q-ll" type="button">Low/Low</button>
+          </div>
+        </div>
         <p id="chartLegendText" class="legend">
           X-axis: Clickthrough intent (CTR), Y-axis: Apply start intent (ASR). Marker size and color are based on intent score = CTR * ASR.
           Dotted reference lines use manual benchmarks when provided; otherwise dataset medians are used.
@@ -398,13 +463,26 @@
           "Taux de candidatures commencees (ASR)",
           "Percentuale di candidature avviate",
           "Porcentaje de postulaciones iniciadas"
+        ],
+        acr: [
+          "Apply completion rate (ACR)",
+          "Apply Completion Rate (ACR)",
+          "ACR",
+          "Sollicitatievoltooiingspercentage (ACR)",
+          "Abschlussrate Bewerbung (ACR)",
+          "Taux de candidature terminee (ACR)",
+          "Percentuale di completamento candidatura (ACR)",
+          "Tasa de finalizacion de solicitud (ACR)"
         ]
       };
 
+      let xThreshold = 0;
+      let yThreshold = 0;
       let ctrThreshold = 0;
       let asrThreshold = 0;
-      let medianCtr = null;
-      let medianAsr = null;
+      let medianByMetric = { ctr: null, asr: null, acr: null };
+      let selectedXAxisMetric = "ctr";
+      let selectedYAxisMetric = "asr";
 
       const csvFile = document.getElementById("csvFile");
       const errorBox = document.getElementById("error");
@@ -416,8 +494,14 @@
       const tiles = document.getElementById("tiles");
       const benchmarkNotice = document.getElementById("benchmarkNotice");
       const uploadSection = document.querySelector(".upload");
-      const ctrBenchmarkInput = document.getElementById("ctrBenchmarkInput");
-      const asrBenchmarkInput = document.getElementById("asrBenchmarkInput");
+      const xAxisMetricSelector = document.getElementById("xAxisMetricSelector");
+      const yAxisMetricSelector = document.getElementById("yAxisMetricSelector");
+      const xBenchmarkInput = document.getElementById("xBenchmarkInput");
+      const yBenchmarkInput = document.getElementById("yBenchmarkInput");
+      const filterQHHBtn = document.getElementById("filterQHH");
+      const filterQHLBtn = document.getElementById("filterQHL");
+      const filterQLHBtn = document.getElementById("filterQLH");
+      const filterQLLBtn = document.getElementById("filterQLL");
       const embedded = new URLSearchParams(window.location.search).get("embedded") === "1";
       const SHARED_UPLOAD_MESSAGE = "shared-csv-upload";
       const UI_LANGUAGE_MESSAGE = "ui-language-changed";
@@ -431,12 +515,12 @@
         nl: { title: "Job intent-kwadrant", upload: "CSV uploaden", hint: "Vereiste kolommen: job, bedrijfsnaam, CTR en ASR. EN/NL/DE/FR/IT/ES-varianten worden ondersteund.", jobs: "Lijst met vacatures", quadrant: "Intentie-kwadrant", benchTitle: "Handmatige benchmarks (optioneel)", ctr: "CTR-benchmark (%)", asr: "ASR-benchmark (%)", applyBench: "Toepassen", legend: "X-as: klikintentie (CTR), Y-as: sollicitatiestart-intentie (ASR). Grootte en kleur op basis van CTR * ASR. Gestippelde lijnen gebruiken handmatige benchmarks, anders medianen.", tiles: "Actietegels", noticeDefault: "Upload data om medianen te berekenen." }
       };
       const localizedTableHeaders = {
-        en: { job: "Job", company: "Company", ctr: "CTR", asr: "ASR", city: "City", country: "Country", impressions: "Impressions", clicks: "Clicks", applications: "Applications", applystarts: "Apply starts", spend: "Spend", cpa: "CPA", cpas: "CPAS", campaign: "Campaign", status: "Status", reference: "Reference" },
-        de: { job: "Job", company: "Unternehmen", ctr: "CTR", asr: "ASR", city: "Stadt", country: "Land", impressions: "Impressionen", clicks: "Klicks", applications: "Bewerbungen", applystarts: "Bewerbungsstarts", spend: "Ausgaben", cpa: "CPA", cpas: "CPAS", campaign: "Kampagne", status: "Status", reference: "Referenz" },
-        fr: { job: "Poste", company: "Entreprise", ctr: "CTR", asr: "ASR", city: "Ville", country: "Pays", impressions: "Impressions", clicks: "Clics", applications: "Candidatures", applystarts: "Débuts de candidature", spend: "Dépenses", cpa: "CPA", cpas: "CPAS", campaign: "Campagne", status: "Statut", reference: "Référence" },
-        es: { job: "Puesto", company: "Empresa", ctr: "CTR", asr: "ASR", city: "Ciudad", country: "País", impressions: "Impresiones", clicks: "Clics", applications: "Solicitudes", applystarts: "Inicios de solicitud", spend: "Gasto", cpa: "CPA", cpas: "CPAS", campaign: "Campaña", status: "Estado", reference: "Referencia" },
-        it: { job: "Ruolo", company: "Azienda", ctr: "CTR", asr: "ASR", city: "Città", country: "Paese", impressions: "Impression", clicks: "Clic", applications: "Candidature", applystarts: "Avvii candidatura", spend: "Spesa", cpa: "CPA", cpas: "CPAS", campaign: "Campagna", status: "Stato", reference: "Riferimento" },
-        nl: { job: "Vacature", company: "Bedrijf", ctr: "CTR", asr: "ASR", city: "Plaats", country: "Land", impressions: "Impressies", clicks: "Klikken", applications: "Sollicitaties", applystarts: "Gestarte sollicitaties", spend: "Uitgaven", cpa: "CPA", cpas: "CPAS", campaign: "Campagne", status: "Status", reference: "Referentie" }
+        en: { job: "Job", company: "Company", ctr: "CTR", asr: "ASR", acr: "ACR", city: "City", country: "Country", impressions: "Impressions", clicks: "Clicks", applications: "Applications", applystarts: "Apply starts", spend: "Spend", cpa: "CPA", cpas: "CPAS", campaign: "Campaign", status: "Status", reference: "Reference" },
+        de: { job: "Job", company: "Unternehmen", ctr: "CTR", asr: "ASR", acr: "ACR", city: "Stadt", country: "Land", impressions: "Impressionen", clicks: "Klicks", applications: "Bewerbungen", applystarts: "Bewerbungsstarts", spend: "Ausgaben", cpa: "CPA", cpas: "CPAS", campaign: "Kampagne", status: "Status", reference: "Referenz" },
+        fr: { job: "Poste", company: "Entreprise", ctr: "CTR", asr: "ASR", acr: "ACR", city: "Ville", country: "Pays", impressions: "Impressions", clicks: "Clics", applications: "Candidatures", applystarts: "Débuts de candidature", spend: "Dépenses", cpa: "CPA", cpas: "CPAS", campaign: "Campagne", status: "Statut", reference: "Référence" },
+        es: { job: "Puesto", company: "Empresa", ctr: "CTR", asr: "ASR", acr: "ACR", city: "Ciudad", country: "País", impressions: "Impresiones", clicks: "Clics", applications: "Solicitudes", applystarts: "Inicios de solicitud", spend: "Gasto", cpa: "CPA", cpas: "CPAS", campaign: "Campaña", status: "Estado", reference: "Referencia" },
+        it: { job: "Ruolo", company: "Azienda", ctr: "CTR", asr: "ASR", acr: "ACR", city: "Città", country: "Paese", impressions: "Impression", clicks: "Clic", applications: "Candidature", applystarts: "Avvii candidatura", spend: "Spesa", cpa: "CPA", cpas: "CPAS", campaign: "Campagna", status: "Stato", reference: "Riferimento" },
+        nl: { job: "Vacature", company: "Bedrijf", ctr: "CTR", asr: "ASR", acr: "ACR", city: "Plaats", country: "Land", impressions: "Impressies", clicks: "Klikken", applications: "Sollicitaties", applystarts: "Gestarte sollicitaties", spend: "Uitgaven", cpa: "CPA", cpas: "CPAS", campaign: "Campagne", status: "Status", reference: "Referentie" }
       };
       const tileText = {
         en: {
@@ -645,7 +729,15 @@
       let currentCompanyHeader = null;
       let currentCtrHeader = null;
       let currentAsrHeader = null;
+      let currentAcrHeader = null;
       let tableSort = { key: null, dir: "asc" };
+      let tableQuadrantFilter = "all";
+
+      const metricMeta = {
+        ctr: { short: "CTR", axisLabel: "Clickthrough intent (CTR)" },
+        asr: { short: "ASR", axisLabel: "Apply start intent (ASR)" },
+        acr: { short: "ACR", axisLabel: "Apply completion intent (ACR)" }
+      };
 
       function applyUiLanguage(lang) {
         currentLanguage = uiText[lang] ? lang : "en";
@@ -660,13 +752,64 @@
         set("jobsTitle", t.jobs);
         set("quadrantTitle", t.quadrant);
         set("benchTitle", t.benchTitle);
-        set("ctrBenchLabel", t.ctr);
-        set("asrBenchLabel", t.asr);
+        set("xAxisLabel", "X-axis metric");
+        set("yAxisLabel", "Y-axis metric");
         set("chartLegendText", t.legend);
         set("tilesTitle", t.tiles);
+        refreshBenchmarkFieldLabels();
+        updateQuadrantFilterButtons();
         if (!currentRows.length) set("benchmarkNotice", t.noticeDefault);
-        if (currentHeaders.length) renderTable(currentHeaders, currentRows);
+        if (currentHeaders.length) renderTable(currentHeaders, getTableRowsForActiveQuadrantFilter());
         if (currentRows.length) rerenderCurrentData();
+      }
+
+      function getMetricHeader(metricKey) {
+        if (metricKey === "ctr") return currentCtrHeader;
+        if (metricKey === "asr") return currentAsrHeader;
+        if (metricKey === "acr") return currentAcrHeader;
+        return null;
+      }
+
+      function getMetricLabel(metricKey) {
+        return (metricMeta[metricKey] && metricMeta[metricKey].short) || String(metricKey || "").toUpperCase();
+      }
+
+      function refreshBenchmarkFieldLabels() {
+        const xMetricLabel = getMetricLabel(selectedXAxisMetric);
+        const yMetricLabel = getMetricLabel(selectedYAxisMetric);
+        const xBenchLabel = document.getElementById("xBenchLabel");
+        const yBenchLabel = document.getElementById("yBenchLabel");
+        if (xBenchLabel) xBenchLabel.textContent = `${xMetricLabel} Benchmark (%)`;
+        if (yBenchLabel) yBenchLabel.textContent = `${yMetricLabel} Benchmark (%)`;
+        if (filterQHHBtn) filterQHHBtn.textContent = `High ${xMetricLabel} / High ${yMetricLabel}`;
+        if (filterQHLBtn) filterQHLBtn.textContent = `High ${xMetricLabel} / Low ${yMetricLabel}`;
+        if (filterQLHBtn) filterQLHBtn.textContent = `Low ${xMetricLabel} / High ${yMetricLabel}`;
+        if (filterQLLBtn) filterQLLBtn.textContent = `Low ${xMetricLabel} / Low ${yMetricLabel}`;
+      }
+
+      function refreshAxisSelectorsAvailability() {
+        const available = {
+          ctr: Boolean(currentCtrHeader),
+          asr: Boolean(currentAsrHeader),
+          acr: Boolean(currentAcrHeader)
+        };
+        [xAxisMetricSelector, yAxisMetricSelector].forEach((selector) => {
+          if (!selector) return;
+          Array.from(selector.options).forEach((opt) => {
+            const key = opt.value;
+            opt.disabled = !available[key];
+          });
+        });
+        if (!available[selectedXAxisMetric]) {
+          selectedXAxisMetric = available.ctr ? "ctr" : available.asr ? "asr" : "acr";
+        }
+        if (!available[selectedYAxisMetric] || selectedYAxisMetric === selectedXAxisMetric) {
+          const candidates = ["asr", "ctr", "acr"];
+          selectedYAxisMetric = candidates.find((key) => key !== selectedXAxisMetric && available[key]) || selectedXAxisMetric;
+        }
+        if (xAxisMetricSelector) xAxisMetricSelector.value = selectedXAxisMetric;
+        if (yAxisMetricSelector) yAxisMetricSelector.value = selectedYAxisMetric;
+        refreshBenchmarkFieldLabels();
       }
 
       async function applyCsvText(text) {
@@ -686,6 +829,7 @@
 
           const ctrHeader = pickHeader(headers, columnAliases.ctr);
           const asrHeader = pickHeader(headers, columnAliases.asr);
+          const acrHeader = pickHeader(headers, columnAliases.acr);
           if (!ctrHeader || !asrHeader) {
             throw new Error(
               "Missing required rate columns. Supported CTR/ASR header variants include EN/NL/DE/FR/IT/ES."
@@ -703,11 +847,15 @@
           currentHeaders = headers.slice();
           currentRows = dataRows;
           tableSort = { key: null, dir: "asc" };
-          renderTable(currentHeaders, currentRows);
+          tableQuadrantFilter = "all";
+          updateQuadrantFilterButtons();
+          renderTable(currentHeaders, getTableRowsForActiveQuadrantFilter());
           currentJobHeader = jobHeader;
           currentCompanyHeader = companyHeader;
           currentCtrHeader = ctrHeader;
           currentAsrHeader = asrHeader;
+          currentAcrHeader = acrHeader;
+          refreshAxisSelectorsAvailability();
           rerenderCurrentData();
         } catch (err) {
           showError(err.message || "Failed to parse CSV.");
@@ -717,10 +865,13 @@
           currentCompanyHeader = null;
           currentCtrHeader = null;
           currentAsrHeader = null;
+          currentAcrHeader = null;
           benchmarkNotice.textContent = (uiText[currentLanguage] || uiText.en).noticeDefault;
           renderTable([], []);
           clearQuadrant();
           tiles.innerHTML = "";
+          tableQuadrantFilter = "all";
+          updateQuadrantFilterButtons();
         }
       }
 
@@ -749,23 +900,28 @@
 
       function rerenderCurrentData() {
         if (!currentRows.length || !currentJobHeader || !currentCompanyHeader || !currentCtrHeader || !currentAsrHeader) return;
-        const rates = currentRows
-          .map((row) => ({ ctr: parseRate(row[currentCtrHeader]), asr: parseRate(row[currentAsrHeader]) }))
-          .filter((r) => r.ctr != null && r.asr != null);
-        const ctrValues = rates.map((r) => r.ctr);
-        const asrValues = rates.map((r) => r.asr);
-        medianCtr = median(ctrValues);
-        medianAsr = median(asrValues);
+        const ctrValues = currentRows.map((row) => parseRate(row[currentCtrHeader])).filter((v) => v != null);
+        const asrValues = currentRows.map((row) => parseRate(row[currentAsrHeader])).filter((v) => v != null);
+        const acrValues = currentAcrHeader ? currentRows.map((row) => parseRate(row[currentAcrHeader])).filter((v) => v != null) : [];
+        medianByMetric.ctr = medianExcludingZero(ctrValues);
+        medianByMetric.asr = medianExcludingZero(asrValues);
+        medianByMetric.acr = acrValues.length ? medianExcludingZero(acrValues) : null;
 
-        const manualCtr = parseBenchmarkInput(ctrBenchmarkInput.value);
-        const manualAsr = parseBenchmarkInput(asrBenchmarkInput.value);
-        ctrThreshold = manualCtr != null ? manualCtr : (medianCtr ?? 0);
-        asrThreshold = manualAsr != null ? manualAsr : (medianAsr ?? 0);
+        const manualX = parseBenchmarkInput(xBenchmarkInput.value);
+        const manualY = parseBenchmarkInput(yBenchmarkInput.value);
+        xThreshold = manualX != null ? manualX : (medianByMetric[selectedXAxisMetric] ?? 0);
+        yThreshold = manualY != null ? manualY : (medianByMetric[selectedYAxisMetric] ?? 0);
+        const manualCtr = selectedXAxisMetric === "ctr" ? manualX : selectedYAxisMetric === "ctr" ? manualY : null;
+        const manualAsr = selectedXAxisMetric === "asr" ? manualX : selectedYAxisMetric === "asr" ? manualY : null;
+        ctrThreshold = manualCtr != null ? manualCtr : (medianByMetric.ctr ?? 0);
+        asrThreshold = manualAsr != null ? manualAsr : (medianByMetric.asr ?? 0);
 
-        const modeLabel = manualCtr != null || manualAsr != null ? "manual/median mixed" : "median auto";
-        benchmarkNotice.innerHTML = `Current medians: <span class="benchmark-accent">CTR ${pctLabel(medianCtr ?? 0)}</span>, <span class="benchmark-accent">ASR ${pctLabel(medianAsr ?? 0)}</span>. Active benchmark mode: ${escapeHTML(modeLabel)}.`;
-        renderQuadrant(currentRows, currentCtrHeader, currentAsrHeader, currentCompanyHeader, currentJobHeader);
+        const modeLabel = manualX != null || manualY != null ? "manual/median mixed" : "median auto";
+        benchmarkNotice.innerHTML = `Current medians (excluding 0 values): <span class="benchmark-accent">${getMetricLabel(selectedXAxisMetric)} ${pctLabel(medianByMetric[selectedXAxisMetric] ?? 0)}</span>, <span class="benchmark-accent">${getMetricLabel(selectedYAxisMetric)} ${pctLabel(medianByMetric[selectedYAxisMetric] ?? 0)}</span>. Active benchmark mode: ${escapeHTML(modeLabel)}.`;
+        renderQuadrant(currentRows, currentCompanyHeader, currentJobHeader);
         renderTiles(currentHeaders, currentRows, currentCtrHeader, currentAsrHeader, currentCompanyHeader, currentJobHeader);
+        updateQuadrantFilterButtons();
+        renderTable(currentHeaders, getTableRowsForActiveQuadrantFilter());
       }
 
       function parseBenchmarkInput(rawValue) {
@@ -780,8 +936,42 @@
         rerenderCurrentData();
       }
 
-      ctrBenchmarkInput.addEventListener("input", applyBenchmarkInputs);
-      asrBenchmarkInput.addEventListener("input", applyBenchmarkInputs);
+      xBenchmarkInput.addEventListener("input", applyBenchmarkInputs);
+      yBenchmarkInput.addEventListener("input", applyBenchmarkInputs);
+      xAxisMetricSelector.addEventListener("change", () => {
+        selectedXAxisMetric = xAxisMetricSelector.value;
+        if (selectedYAxisMetric === selectedXAxisMetric) {
+          const candidates = ["asr", "ctr", "acr"];
+          const next = candidates.find((k) => k !== selectedXAxisMetric && getMetricHeader(k));
+          if (next) selectedYAxisMetric = next;
+        }
+        refreshAxisSelectorsAvailability();
+        rerenderCurrentData();
+      });
+      yAxisMetricSelector.addEventListener("change", () => {
+        selectedYAxisMetric = yAxisMetricSelector.value;
+        if (selectedYAxisMetric === selectedXAxisMetric) {
+          const candidates = ["asr", "ctr", "acr"];
+          const next = candidates.find((k) => k !== selectedYAxisMetric && getMetricHeader(k));
+          if (next) selectedXAxisMetric = next;
+        }
+        refreshAxisSelectorsAvailability();
+        rerenderCurrentData();
+      });
+
+      [
+        { key: "highHigh", btn: filterQHHBtn },
+        { key: "highLow", btn: filterQHLBtn },
+        { key: "lowHigh", btn: filterQLHBtn },
+        { key: "lowLow", btn: filterQLLBtn }
+      ].forEach(({ key, btn }) => {
+        if (!btn) return;
+        btn.addEventListener("click", () => {
+          tableQuadrantFilter = tableQuadrantFilter === key ? "all" : key;
+          updateQuadrantFilterButtons();
+          renderTable(currentHeaders, getTableRowsForActiveQuadrantFilter());
+        });
+      });
       applyUiLanguage(currentLanguage);
 
       function showError(message) {
@@ -828,6 +1018,47 @@
         });
 
         return groups;
+      }
+
+      function classifyRowsByCurrentAxes(rows) {
+        const xHeader = getMetricHeader(selectedXAxisMetric);
+        const yHeader = getMetricHeader(selectedYAxisMetric);
+        const groups = {
+          highHigh: [],
+          highLow: [],
+          lowHigh: [],
+          lowLow: []
+        };
+        if (!xHeader || !yHeader) return groups;
+        rows.forEach((row) => {
+          const xVal = parseRate(row[xHeader]);
+          const yVal = parseRate(row[yHeader]);
+          if (xVal == null || yVal == null) return;
+          if (xVal >= xThreshold && yVal >= yThreshold) groups.highHigh.push(row);
+          else if (xVal >= xThreshold && yVal < yThreshold) groups.highLow.push(row);
+          else if (xVal < xThreshold && yVal >= yThreshold) groups.lowHigh.push(row);
+          else groups.lowLow.push(row);
+        });
+        return groups;
+      }
+
+      function getTableRowsForActiveQuadrantFilter() {
+        if (tableQuadrantFilter === "all") return currentRows;
+        const groups = classifyRowsByCurrentAxes(currentRows);
+        return groups[tableQuadrantFilter] || [];
+      }
+
+      function updateQuadrantFilterButtons() {
+        const mapping = [
+          { key: "highHigh", btn: filterQHHBtn },
+          { key: "highLow", btn: filterQHLBtn },
+          { key: "lowHigh", btn: filterQLHBtn },
+          { key: "lowLow", btn: filterQLLBtn }
+        ];
+        mapping.forEach(({ key, btn }) => {
+          if (!btn) return;
+          btn.classList.toggle("active", tableQuadrantFilter === key);
+        });
       }
 
       function renderTiles(headers, rows, ctrHeader, asrHeader, companyHeader, jobHeader) {
@@ -934,6 +1165,7 @@
         if (columnAliases.company.some((h) => normalizeHeaderName(h) === normalized)) return "company";
         if (columnAliases.ctr.some((h) => normalizeHeaderName(h) === normalized)) return "ctr";
         if (columnAliases.asr.some((h) => normalizeHeaderName(h) === normalized)) return "asr";
+        if (columnAliases.acr.some((h) => normalizeHeaderName(h) === normalized)) return "acr";
         if (normalized.includes("city") || normalized.includes("plaats") || normalized.includes("stadt") || normalized.includes("ville") || normalized.includes("citta") || normalized.includes("ciudad")) return "city";
         if (normalized.includes("country") || normalized.includes("land") || normalized.includes("pais") || normalized.includes("paese") || normalized.includes("pays")) return "country";
         if (normalized.includes("impression")) return "impressions";
@@ -995,7 +1227,7 @@
               tableSort.key = h;
               tableSort.dir = "asc";
             }
-            renderTable(currentHeaders, currentRows);
+            renderTable(currentHeaders, getTableRowsForActiveQuadrantFilter());
           });
           th.appendChild(btn);
           tr.appendChild(th);
@@ -1017,20 +1249,23 @@
         chart.innerHTML = "";
       }
 
-      function renderQuadrant(rows, ctrHeader, asrHeader, companyHeader, jobHeader) {
+      function renderQuadrant(rows, companyHeader, jobHeader) {
         clearQuadrant();
+        const xHeader = getMetricHeader(selectedXAxisMetric);
+        const yHeader = getMetricHeader(selectedYAxisMetric);
+        if (!xHeader || !yHeader) return;
 
         const points = rows
           .map((row) => {
-            const ctr = parseRate(row[ctrHeader]);
-            const asr = parseRate(row[asrHeader]);
-            if (ctr == null || asr == null) return null;
+            const xMetric = parseRate(row[xHeader]);
+            const yMetric = parseRate(row[yHeader]);
+            if (xMetric == null || yMetric == null) return null;
             return {
               company: row[companyHeader] || "",
               job: row[jobHeader] || "",
-              ctr,
-              asr,
-              intent: ctr * asr,
+              xMetric,
+              yMetric,
+              intent: xMetric * yMetric,
             };
           })
           .filter(Boolean);
@@ -1043,10 +1278,10 @@
         const plotW = W - margin.left - margin.right;
         const plotH = H - margin.top - margin.bottom;
 
-        const maxCtr = Math.max(ctrThreshold, ...points.map((p) => p.ctr));
-        const maxAsr = Math.max(asrThreshold, ...points.map((p) => p.asr));
-        const xMax = niceMax(maxCtr);
-        const yMax = niceMax(maxAsr);
+        const maxX = Math.max(xThreshold, ...points.map((p) => p.xMetric));
+        const maxY = Math.max(yThreshold, ...points.map((p) => p.yMetric));
+        const xMax = niceMax(maxX);
+        const yMax = niceMax(maxY);
 
         const toX = (v) => margin.left + (v / xMax) * plotW;
         const toY = (v) => margin.top + plotH - (v / yMax) * plotH;
@@ -1062,8 +1297,8 @@
         chart.appendChild(bg);
 
         const midV = svgEl("line", {
-          x1: toX(ctrThreshold),
-          x2: toX(ctrThreshold),
+          x1: toX(xThreshold),
+          x2: toX(xThreshold),
           y1: margin.top,
           y2: margin.top + plotH,
           stroke: "#5a6a7a",
@@ -1075,8 +1310,8 @@
         const midH = svgEl("line", {
           x1: margin.left,
           x2: margin.left + plotW,
-          y1: toY(asrThreshold),
-          y2: toY(asrThreshold),
+          y1: toY(yThreshold),
+          y2: toY(yThreshold),
           stroke: "#5a6a7a",
           "stroke-dasharray": "6 5",
           "stroke-width": "2",
@@ -1087,12 +1322,12 @@
           svgEl(
             "text",
             {
-              x: toX(ctrThreshold) + 6,
+              x: toX(xThreshold) + 6,
               y: margin.top + 16,
               fill: "#334155",
               "font-size": "12",
             },
-            `CTR benchmark ${pctLabel(ctrThreshold)}`
+            `${getMetricLabel(selectedXAxisMetric)} benchmark ${pctLabel(xThreshold)}`
           )
         );
 
@@ -1101,11 +1336,11 @@
             "text",
             {
               x: margin.left + 8,
-              y: toY(asrThreshold) - 6,
+              y: toY(yThreshold) - 6,
               fill: "#334155",
               "font-size": "12",
             },
-            `ASR benchmark ${pctLabel(asrThreshold)}`
+            `${getMetricLabel(selectedYAxisMetric)} benchmark ${pctLabel(yThreshold)}`
           )
         );
 
@@ -1175,9 +1410,9 @@
               y: H - 12,
               fill: "#1f2d3d",
               "font-size": "14",
-              "text-anchor": "middle",
+            "text-anchor": "middle",
             },
-            "Clickthrough intent (CTR)"
+            metricMeta[selectedXAxisMetric] ? metricMeta[selectedXAxisMetric].axisLabel : getMetricLabel(selectedXAxisMetric)
           )
         );
 
@@ -1192,15 +1427,15 @@
               transform: `rotate(-90 20 ${margin.top + plotH / 2})`,
               "text-anchor": "middle",
             },
-            "Apply start intent (ASR)"
+            metricMeta[selectedYAxisMetric] ? metricMeta[selectedYAxisMetric].axisLabel : getMetricLabel(selectedYAxisMetric)
           )
         );
 
         const maxIntent = Math.max(0.0001, ...points.map((p) => p.intent));
 
         points.forEach((p) => {
-          const cx = toX(p.ctr);
-          const cy = toY(p.asr);
+          const cx = toX(p.xMetric);
+          const cy = toY(p.yMetric);
           const r = 4 + (p.intent / maxIntent) * 14;
 
           const c = svgEl("circle", {
@@ -1219,7 +1454,7 @@
             const y = evt.clientY + 12;
             tooltip.style.left = `${x}px`;
             tooltip.style.top = `${y}px`;
-            tooltip.innerHTML = `<strong>${escapeHTML(p.company)}</strong><br>${escapeHTML(p.job)}<br>CTR: ${pctLabel(p.ctr)}<br>ASR: ${pctLabel(p.asr)}<br>Intent: ${p.intent.toFixed(4)}`;
+            tooltip.innerHTML = `<strong>${escapeHTML(p.company)}</strong><br>${escapeHTML(p.job)}<br>${escapeHTML(getMetricLabel(selectedXAxisMetric))}: ${pctLabel(p.xMetric)}<br>${escapeHTML(getMetricLabel(selectedYAxisMetric))}: ${pctLabel(p.yMetric)}<br>Intent: ${p.intent.toFixed(4)}`;
             tooltip.style.display = "block";
           };
 
@@ -1419,6 +1654,13 @@ If ASR drops significantly, refine keyword breadth.`
         const mid = Math.floor(sorted.length / 2);
         if (sorted.length % 2 === 0) return (sorted[mid - 1] + sorted[mid]) / 2;
         return sorted[mid];
+      }
+
+      function medianExcludingZero(values) {
+        const nonZero = (Array.isArray(values) ? values : []).filter((v) => Number.isFinite(v) && v > 0);
+        if (nonZero.length) return median(nonZero);
+        const withZero = (Array.isArray(values) ? values : []).filter((v) => Number.isFinite(v));
+        return withZero.length ? median(withZero) : null;
       }
 
       function niceMax(v) {
